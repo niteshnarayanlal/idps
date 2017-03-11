@@ -1,6 +1,6 @@
 #! /usr/bin/env python
-import socket, subprocess, netaddr, nmap, copy
-import signal, sys
+import os, socket, subprocess, netaddr, nmap, copy
+import signal, sys ,re
 from netaddr import IPAddress
 from time import sleep
 ###########Global variables##########
@@ -65,14 +65,47 @@ def scan_network(cidr, discovered_hosts):
 		discovered_hosts.append(item)
 		nohdiscovered = nohdiscovered + 1;
 	return nohdiscovered
-	
+
+def updadte_known_host(second_scan_hosts, snohosts):
+	print "Updating the known hosts list"
+	global first_scan_hosts
+	first_scan_hosts = list(second_scan_hosts)
+	fnohosts = snohosts 
+	return fnohosts
+
+def find_mac(host_ip):
+#Assuming use of arping on Red Hat Linux
+	p = subprocess.Popen("/usr/sbin/arping -c 2 %s" % host_ip, shell=True, stdout=subprocess.PIPE)
+	out = p.stdout.read()
+	result = out.split()
+	pattern = re.compile(":")
+	for item in result:
+		if re.search(pattern, item):
+			mac = item
+			break	
+	return mac
+
+def block_host(host_ip):
+	#Here we will find the MAC address as IP of the same host may be change
+	#To remove this user may have to open the iptables and remove the rule for now
+	mac = find_mac(host_ip)	
+	print "Mac address for the new host", mac
+	cmd = "iptables -A INPUT -m mac --mac-source " + mac + " -j DROP"
+	print "IPtable command:", cmd	
+	os.system(cmd)
+	print "Host successfull blocked, please remove the rule from iptables to allow"
+
 def check_new_host(second_scan_hosts, fnohosts, snohosts):	
 	ftmp_idx = 0
 	stmp_idx = 0
 	match = 0
 	tmp = 0
 	host_removed = 0
+	host_added = 0
+	new_host = []
+	no_new_host = 0
 	global first_scan_hosts 
+	wrong_usr_inp_flag = 0
 #	if first_scan_hosts == second_scan_hosts:
 		#Do Nothing
 #	while tmp < snohosts:
@@ -92,10 +125,40 @@ def check_new_host(second_scan_hosts, fnohosts, snohosts):
 		if match == 0:
 			print "************ALERT!!New Host Discovered***************"
 			print second_scan_hosts[stmp_idx]
+			new_host.append(second_scan_hosts[stmp_idx])
+			no_new_host = no_new_host + 1
+			#The script will discover hosts based on first come on first serve
+			host_added = 1
 		stmp_idx = stmp_idx + 1
-
+	if host_added == 1:
+		while wrong_usr_inp_flag == 0:
+			tmp = 0
+			print "Number of new hosts", no_new_host
+			while tmp < no_new_host:
+				print "New Host is:", new_host[tmp]
+				user_ch = raw_input("Do you want to block this new host (y/n)")
+				if user_ch == 'y':
+					#Use IP tables to block this
+					print "Blocking the IPaddress and keeping the known host list as it is"
+					block_host(new_host[tmp])
+					print "Continuing monitoring...."
+					wrong_usr_inp_flag = 1
+				elif user_ch == 'n':
+					#Update the list by adding this new host to known host list
+					fnohosts = updadte_known_host(second_scan_hosts, snohosts)
+					print "Updated known hosts are"
+					tmp = 0
+					while tmp < fnohosts:
+						print first_scan_hosts[tmp]
+						tmp = tmp + 1
+					wrong_usr_inp_flag = 1
+				else:
+					print 'Wrong choice entered, please try again.'
+					wrong_usr_inp_flag = 0
+				tmp = tmp + 1
 	stmp_idx = 0
 	ftmp_idx = 0	
+	tmp = 0
 #Logic to check if any IP address is removed
 	while ftmp_idx != fnohosts:
 		stmp_idx = 0
@@ -111,10 +174,7 @@ def check_new_host(second_scan_hosts, fnohosts, snohosts):
 			host_removed = 1
 		ftmp_idx = ftmp_idx + 1
 	if host_removed == 1:
-		print "Updating the known hosts list"
-		first_scan_hosts = []
-		first_scan_hosts = list(second_scan_hosts)
-		fnohosts = snohosts 
+		fnohosts = updadte_known_host(second_scan_hosts, snohosts)
 		print "Updated known hosts are"
 		tmp = 0
 		while tmp < fnohosts:
