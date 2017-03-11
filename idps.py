@@ -5,6 +5,7 @@ from netaddr import IPAddress
 from time import sleep
 ###########Global variables##########
 first_scan_hosts = []
+blocked_mac = []
 #####################################
 
 def dottedQuadToNum(ip):
@@ -88,8 +89,10 @@ def find_mac(host_ip):
 def block_host(host_ip):
 	#Here we will find the MAC address as IP of the same host may be change
 	#To remove this user may have to open the iptables and remove the rule for now
+	global blocked_mac
 	mac = find_mac(host_ip)	
 	print "Mac address for the new host", mac
+	blocked_mac.append(mac)
 	cmd = "iptables -A INPUT -m mac --mac-source " + mac + " -j DROP"
 	print "IPtable command:", cmd	
 	os.system(cmd)
@@ -123,12 +126,14 @@ def check_new_host(second_scan_hosts, fnohosts, snohosts):
 				break
 			ftmp_idx = ftmp_idx + 1
 		if match == 0:
-			print "************ALERT!!New Host Discovered***************"
-			print second_scan_hosts[stmp_idx]
-			new_host.append(second_scan_hosts[stmp_idx])
-			no_new_host = no_new_host + 1
-			#The script will discover hosts based on first come on first serve
-			host_added = 1
+			mac = find_mac(second_scan_hosts[stmp_idx])
+			if mac not in blocked_mac:
+				print "************ALERT!!New Host Discovered***************"
+				print second_scan_hosts[stmp_idx]
+				new_host.append(second_scan_hosts[stmp_idx])
+				no_new_host = no_new_host + 1
+				#The script will discover hosts based on first come on first serve
+				host_added = 1
 		stmp_idx = stmp_idx + 1
 	if host_added == 1:
 		while wrong_usr_inp_flag == 0:
